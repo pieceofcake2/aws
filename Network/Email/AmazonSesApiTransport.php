@@ -1,7 +1,5 @@
 <?php
 
-use Aws\SesV2\SesV2Client;
-
 App::uses('AbstractTransport', 'Network/Email');
 App::uses('CakeEmail', 'Network/Email');
 App::uses('ComponentCollection', 'Controller');
@@ -30,13 +28,15 @@ class AmazonSesApiTransport extends AbstractTransport
 
     /**
      * Merge AWS config from Configure::read('Aws') and transport config.
+     *
+     * @param array $config Transport configuration.
      */
     public function __construct(array $config = [])
     {
         // Merge: defaults -> global -> instance config
         $this->_config = array_merge(
             $this->_config,
-            $config
+            $config,
         );
 
         /** @var AwsComponent $Aws */
@@ -44,6 +44,12 @@ class AmazonSesApiTransport extends AbstractTransport
             ->load('Aws.Aws');
     }
 
+    /**
+     * Send mail via Amazon SES API v2.
+     *
+     * @param \CakeEmail $email CakeEmail
+     * @return array{id: string|null} The SES message ID.
+     */
     public function send(CakeEmail $email)
     {
         // Initialize SES V2 client
@@ -61,7 +67,7 @@ class AmazonSesApiTransport extends AbstractTransport
             ];
         }
 
-        /** @var SesV2Client $sesV2Client */
+        /** @var \Aws\SesV2\SesV2Client $sesV2Client */
         $sesV2Client = $this->Aws->createSesV2($clientConfig);
 
         // Extract all email properties
@@ -145,15 +151,14 @@ class AmazonSesApiTransport extends AbstractTransport
     /**
      * Flatten various CakeEmail address formats into a simple array of email strings.
      *
-     * @param mixed $addresses string, associative array, or nested array
-     *
-     * @return string[]
+     * @param array $addresses Associative array (email => name) or list of emails
+     * @return array<string>
      */
     private function getAddresses(array $addresses): array
     {
         $list = [];
         // Normalize various CakeEmail address formats into email => name pairs
-        foreach ((array) $addresses as $email => $name) {
+        foreach ((array)$addresses as $email => $name) {
             // Handle numeric keys (list of emails)
             if (is_int($email)) {
                 $email = $name;

@@ -1,4 +1,6 @@
 <?php
 
-$client = new Aws\S3\S3Client((array) Configure::read('Aws'));
+use Aws\S3\S3Client;
+
+$client = new S3Client((array)Configure::read('Aws'));
 $client->registerStreamWrapperV2();

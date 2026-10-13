@@ -1,16 +1,26 @@
 <?php
 
-use Aws\DynamoDb\DynamoDbClient;
 use Aws\DynamoDb\SessionHandler;
 
 App::uses('CakeSessionHandlerInterface', 'Model/Datasource/Session');
 App::uses('ComponentCollection', 'Controller');
 App::uses('CakeException', 'Error');
 
+/**
+ * DynamoDB session handler
+ *
+ * Stores sessions in DynamoDB using `Aws\DynamoDb\SessionHandler`.
+ * Configure the table with `Session.handler.table_name`.
+ */
 class DynamoDbSession implements CakeSessionHandlerInterface
 {
     private SessionHandler $handler;
 
+    /**
+     * Constructor
+     *
+     * @throws \CakeException When `Session.handler.table_name` is not configured.
+     */
     public function __construct()
     {
         $table_name = Configure::read('Session.handler.table_name');
@@ -22,7 +32,7 @@ class DynamoDbSession implements CakeSessionHandlerInterface
         $Aws = (new ComponentCollection())
             ->load('Aws.Aws');
 
-        /** @var DynamoDbClient $dynamoDbClient */
+        /** @var \Aws\DynamoDb\DynamoDbClient $dynamoDbClient */
         $dynamoDbClient = $Aws->createDynamoDb();
 
         $this->handler = $dynamoDbClient->registerSessionHandler([
@@ -58,7 +68,6 @@ class DynamoDbSession implements CakeSessionHandlerInterface
      * Method used to read from a session.
      *
      * @param string $id The key of the value to read
-     *
      * @return mixed The value of the key or false if it does not exist
      */
     public function read($id)
@@ -69,9 +78,8 @@ class DynamoDbSession implements CakeSessionHandlerInterface
     /**
      * Helper function called on write for sessions.
      *
-     * @param int   $id   ID that uniquely identifies session in database
-     * @param mixed $data the value of the data to be saved
-     *
+     * @param string $id ID that uniquely identifies session in database
+     * @param mixed $data The value of the data to be saved
      * @return bool true for successful write, false otherwise
      */
     public function write($id, $data): bool
@@ -82,8 +90,7 @@ class DynamoDbSession implements CakeSessionHandlerInterface
     /**
      * Method called on the destruction of a session.
      *
-     * @param int $id ID that uniquely identifies session in database
-     *
+     * @param string $id ID that uniquely identifies session in database
      * @return bool true for successful delete, false otherwise
      */
     public function destroy($id): bool
@@ -96,7 +103,6 @@ class DynamoDbSession implements CakeSessionHandlerInterface
      * expired or dead sessions.
      *
      * @param int $expires Timestamp (defaults to current time)
-     *
      * @return bool Success
      */
     public function gc($expires = null): bool
