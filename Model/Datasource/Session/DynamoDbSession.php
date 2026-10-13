@@ -35,7 +35,8 @@ class DynamoDbSession implements CakeSessionHandlerInterface
         /** @var \Aws\DynamoDb\DynamoDbClient $dynamoDbClient */
         $dynamoDbClient = $Aws->createDynamoDb();
 
-        $this->handler = $dynamoDbClient->registerSessionHandler([
+        // CakeSession registers this class as the save handler, so the SDK's handler must not register itself.
+        $this->handler = SessionHandler::fromClient($dynamoDbClient, [
             'table_name' => $table_name,
             'locking' => true,
         ]);
