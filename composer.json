@@ -1,19 +1,20 @@
 {
     "name": "pieceofcake2/aws",
+    "description": "AWS SDK integration for CakePHP 2: S3 stream wrapper, DynamoDB session handler and Amazon SES email transport",
     "type": "cakephp-plugin",
-    "keywords": ["cakephp", "cakephp2", "aws"],
+    "keywords": ["cakephp", "cakephp2", "aws", "s3", "dynamodb", "ses"],
     "license": "MIT",
     "require": {
         "php": "^8.1",
         "aws/aws-sdk-php": "^3.343",
-        "composer/installers": "*",
-        "pieceofcake2/cakephp": "^2.10"
+        "composer/installers": "^1.0 || ^2.0",
+        "pieceofcake2/cakephp": "^2.12"
     },
     "require-dev": {
         "cakephp/cakephp-codesniffer": "^5.0",
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^9.6",
-        "pieceofcake2/app": "^2.1",
+        "pieceofcake2/app": "^2.2",
         "pieceofcake2/phpstan-cakephp2": "^0.2.1"
     },
     "config": {
