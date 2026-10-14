@@ -10,8 +10,8 @@
 
 The AWS plugin integrates the AWS SDK for PHP with CakePHP 2 applications running on
 [pieceofcake2/cakephp](https://github.com/pieceofcake2/cakephp): an `Aws` component that
-creates AWS service clients, an S3 stream wrapper, a DynamoDB session handler and an Amazon
-SES email transport.
+creates AWS service clients, an S3 stream wrapper, a DynamoDB session handler, a DynamoDB
+cache engine (`Aws.DynamoDb`) and an Amazon SES email transport.
 
 ## Requirements
 
