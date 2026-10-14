@@ -11,7 +11,12 @@ App::uses('CakeException', 'Error');
  * DynamoDB session handler
  *
  * Stores sessions in DynamoDB using `Aws\DynamoDb\SessionHandler`.
- * Configure the table with `Session.handler.table_name`.
+ * Configure the table with `Session.handler.table_name`. Other keys of `Session.handler` (except `engine`)
+ * are passed to the SDK's session handler (e.g. `locking`, `session_lifetime`, `consistent_read`).
+ *
+ * The SDK's `gc()` does nothing, so expired sessions are not removed by PHP's garbage collection.
+ * Enable Time to Live on the table with the `expires` attribute so that DynamoDB removes them.
+ * This handler turns off PHP's garbage collection (`session.gc_probability = 0`) because it would never remove anything.
  */
 class DynamoDbSession implements CakeSessionHandlerInterface
 {
@@ -32,11 +37,15 @@ class DynamoDbSession implements CakeSessionHandlerInterface
         $Aws = new AwsComponent(new ComponentCollection());
         $dynamoDbClient = $Aws->createDynamoDb();
 
+        $options = array_diff_key((array)Configure::read('Session.handler'), array_flip(['engine', 'table_name']));
+
         // CakeSession registers this class as the save handler, so the SDK's handler must not register itself.
-        $this->handler = SessionHandler::fromClient($dynamoDbClient, [
-            'table_name' => $table_name,
-            'locking' => true,
-        ]);
+        $this->handler = SessionHandler::fromClient($dynamoDbClient, ['table_name' => $table_name] + $options + ['locking' => true]);
+
+        // The SDK's gc() does nothing; expired sessions are removed by the table's Time to Live (`expires`).
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            ini_set('session.gc_probability', '0');
+        }
     }
 
     /**
@@ -95,8 +104,9 @@ class DynamoDbSession implements CakeSessionHandlerInterface
     }
 
     /**
-     * Run the Garbage collection on the session storage. This method should vacuum all
-     * expired or dead sessions.
+     * Run the Garbage collection on the session storage.
+     *
+     * The SDK's handler does nothing here. Expired sessions are removed by the table's Time to Live (`expires`).
      *
      * @param int $expires Timestamp (defaults to current time)
      * @return bool Success

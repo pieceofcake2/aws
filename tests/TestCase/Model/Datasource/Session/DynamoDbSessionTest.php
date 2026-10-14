@@ -63,6 +63,47 @@ class DynamoDbSessionTest extends CakeTestCase
         $this->assertSame($before, ini_get('session.save_handler'));
     }
 
+    public function testConstructTurnsOffPhpGarbageCollection(): void
+    {
+        $before = ini_get('session.gc_probability');
+        ini_set('session.gc_probability', '1');
+        try {
+            new DynamoDbSession();
+
+            $this->assertSame('0', ini_get('session.gc_probability'));
+        } finally {
+            ini_set('session.gc_probability', (string)$before);
+        }
+    }
+
+    public function testReadUsesLockingByDefault(): void
+    {
+        $this->mock->append(new Result(['Attributes' => []]));
+
+        $this->openSession()->read('abc');
+
+        $this->assertSame('UpdateItem', $this->lastCommand()->getName());
+    }
+
+    public function testHandlerOptionsArePassedToSdk(): void
+    {
+        Configure::write('Session.handler', [
+            'engine' => 'Aws.DynamoDbSession',
+            'table_name' => 'sessions',
+            'locking' => false,
+            'session_lifetime' => 259200,
+        ]);
+        $this->mock->append(new Result([]));
+
+        $session = $this->openSession();
+        $session->write('abc', 'serialized');
+
+        $command = $this->lastCommand();
+        $this->assertSame('UpdateItem', $command->getName());
+        $expires = (int)$command['AttributeUpdates']['expires']['Value']['N'];
+        $this->assertEqualsWithDelta(time() + 259200, $expires, 5);
+    }
+
     public function testRead(): void
     {
         $this->mock->append(new Result([
