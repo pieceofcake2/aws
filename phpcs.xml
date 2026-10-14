@@ -9,6 +9,7 @@
 
     <file>./Config</file>
     <file>./Controller</file>
+    <file>./Lib</file>
     <file>./Model</file>
     <file>./Network</file>
     <file>./tests</file>
