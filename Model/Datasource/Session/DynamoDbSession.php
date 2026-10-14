@@ -4,6 +4,7 @@ use Aws\DynamoDb\SessionHandler;
 
 App::uses('CakeSessionHandlerInterface', 'Model/Datasource/Session');
 App::uses('ComponentCollection', 'Controller');
+App::uses('AwsComponent', 'Aws.Controller/Component');
 App::uses('CakeException', 'Error');
 
 /**
@@ -28,11 +29,7 @@ class DynamoDbSession implements CakeSessionHandlerInterface
             throw new CakeException('DynamoDB session handler "table_name" is not configured.');
         }
 
-        /** @var AwsComponent $Aws */
-        $Aws = (new ComponentCollection())
-            ->load('Aws.Aws');
-
-        /** @var \Aws\DynamoDb\DynamoDbClient $dynamoDbClient */
+        $Aws = new AwsComponent(new ComponentCollection());
         $dynamoDbClient = $Aws->createDynamoDb();
 
         // CakeSession registers this class as the save handler, so the SDK's handler must not register itself.
@@ -49,10 +46,8 @@ class DynamoDbSession implements CakeSessionHandlerInterface
      */
     public function open(): bool
     {
-        $savePath = null;
-        $sessionName = session_name();
-
-        return $this->handler->open($savePath, $sessionName);
+        // The SDK handler stores the save path but never uses it.
+        return $this->handler->open('', session_name());
     }
 
     /**
@@ -79,7 +74,7 @@ class DynamoDbSession implements CakeSessionHandlerInterface
     /**
      * Helper function called on write for sessions.
      *
-     * @param string $id ID that uniquely identifies session in database
+     * @param string|int $id ID that uniquely identifies session in database
      * @param mixed $data The value of the data to be saved
      * @return bool true for successful write, false otherwise
      */
@@ -91,7 +86,7 @@ class DynamoDbSession implements CakeSessionHandlerInterface
     /**
      * Method called on the destruction of a session.
      *
-     * @param string $id ID that uniquely identifies session in database
+     * @param string|int $id ID that uniquely identifies session in database
      * @return bool true for successful delete, false otherwise
      */
     public function destroy($id): bool

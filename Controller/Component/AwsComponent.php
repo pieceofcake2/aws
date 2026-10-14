@@ -10,6 +10,10 @@ App::uses('Configure', 'Core');
  *
  * Creates AWS service clients from an `Aws\Sdk` configured with `Configure::read('Aws')`.
  * `$this->Aws->S3` and `$this->Aws->createS3($args)` both return an `Aws\S3\S3Client`.
+ *
+ * @method \Aws\DynamoDb\DynamoDbClient createDynamoDb(array $args = [])
+ * @method \Aws\S3\S3Client createS3(array $args = [])
+ * @method \Aws\SesV2\SesV2Client createSesV2(array $args = [])
  */
 class AwsComponent extends Component
 {
