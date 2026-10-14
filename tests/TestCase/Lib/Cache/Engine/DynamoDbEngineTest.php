@@ -275,6 +275,13 @@ class DynamoDbEngineTest extends CakeTestCase
         $this->assertFalse($this->lastCommand()['ConsistentRead']);
     }
 
+    public function testReadWithoutValue(): void
+    {
+        $this->mock->append(new Result(['Item' => ['id' => ['S' => 'test_key']]]));
+
+        $this->assertFalse($this->engine()->read('test_key'));
+    }
+
     public function testReadExpired(): void
     {
         $this->mock->append(new Result($this->item('test_key', ['B' => serialize('value')], time() - 1)));
@@ -348,6 +355,13 @@ class DynamoDbEngineTest extends CakeTestCase
 
         $this->assertFalse($this->engine()->increment('test_count'));
         $this->assertSame([], DynamoDbEngineTestLog::$messages);
+    }
+
+    public function testIncrementWithoutReturnedValue(): void
+    {
+        $this->mock->append(new Result([]));
+
+        $this->assertFalse($this->engine()->increment('test_count'));
     }
 
     public function testIncrementNonNumeric(): void
@@ -489,6 +503,15 @@ class DynamoDbEngineTest extends CakeTestCase
         $this->assertSame('UpdateItem', $command->getName());
         $this->assertSame(['id' => ['S' => 'test_posts']], $command['Key']);
         $this->assertSame('SET #v = if_not_exists(#v, :one) REMOVE #e', $command['UpdateExpression']);
+    }
+
+    public function testGroupsFailure(): void
+    {
+        $engine = $this->engine(['groups' => ['posts']]);
+        $this->mock->append($this->error('ResourceNotFoundException'), $this->error('ResourceNotFoundException'));
+
+        $this->assertSame(['posts1'], $engine->groups());
+        $this->assertCount(2, DynamoDbEngineTestLog::$messages);
     }
 
     public function testGroupsAreUsedInKeys(): void

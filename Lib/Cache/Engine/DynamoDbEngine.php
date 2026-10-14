@@ -1,7 +1,6 @@
 <?php
 
 use Aws\DynamoDb\DynamoDbClient;
-use Aws\DynamoDb\Exception\DynamoDbException;
 use Aws\Exception\AwsException;
 
 App::uses('CacheEngine', 'Cache');
@@ -175,14 +174,10 @@ class DynamoDbEngine extends CacheEngine
                 ],
                 'ExpressionAttributeValues' => [':now' => ['N' => (string)time()]],
             ]);
-        } catch (DynamoDbException $e) {
+        } catch (AwsException $e) {
             if ($e->getAwsErrorCode() !== 'ConditionalCheckFailedException') {
                 $this->_logError('add', $key, $e);
             }
-
-            return false;
-        } catch (AwsException $e) {
-            $this->_logError('add', $key, $e);
 
             return false;
         }
@@ -441,14 +436,10 @@ class DynamoDbEngine extends CacheEngine
                 ],
                 'ReturnValues' => 'UPDATED_NEW',
             ]);
-        } catch (DynamoDbException $e) {
+        } catch (AwsException $e) {
             if ($e->getAwsErrorCode() !== 'ConditionalCheckFailedException') {
                 $this->_logError($operation, $key, $e);
             }
-
-            return false;
-        } catch (AwsException $e) {
-            $this->_logError($operation, $key, $e);
 
             return false;
         }
