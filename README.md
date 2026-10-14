@@ -21,19 +21,36 @@ composer require pieceofcake2/aws
 ```php
     Configure::write('Session', [
         'defaults' => 'php',
+        'cookie' => 'MY_APP',
         'handler' => [
             'engine' => 'Aws.DynamoDbSession',
-            'table_name' => 'DYNAMODB_TABLE_NAME'
+            'table_name' => 'DYNAMODB_TABLE_NAME',
+            // Optional: other options of Aws\DynamoDb\SessionHandler (default: 'locking' => true)
+            // 'locking' => true,
         ],
         'timeout' => 1440,
         'ini' => [
             'session.cookie_lifetime' => 0,
-            'session.gc_maxlifetime' => 2580000,
-            'session.gc_probability' => 1,
-            'session.gc_divisor' => 100,
+            // Written to the "expires" attribute of each item
+            'session.gc_maxlifetime' => 259200,
         ],
     ]);
 ```
+
+### Removing expired sessions
+
+`Aws\DynamoDb\SessionHandler::gc()` does nothing, so PHP's garbage collection never removes expired sessions.
+`DynamoDbSession` turns it off (`session.gc_probability = 0`).
+Enable [Time to Live](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/TTL.html) on the table with the `expires` attribute, and DynamoDB removes expired sessions:
+
+```
+aws dynamodb update-time-to-live --table-name DYNAMODB_TABLE_NAME \
+    --time-to-live-specification "Enabled=true,AttributeName=expires"
+```
+
+The table needs a string partition key named `id`.
+
+If several applications share a domain and a table, give each application its own session cookie name (`Session.cookie`) so that they do not read each other's sessions.
 
 ```php
 /*
