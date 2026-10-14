@@ -3,6 +3,7 @@
 App::uses('AbstractTransport', 'Network/Email');
 App::uses('CakeEmail', 'Network/Email');
 App::uses('ComponentCollection', 'Controller');
+App::uses('AwsComponent', 'Aws.Controller/Component');
 
 /**
  * Amazon SES Email Transport for CakePHP 2.x.
@@ -39,9 +40,7 @@ class AmazonSesApiTransport extends AbstractTransport
             $config,
         );
 
-        /** @var AwsComponent $Aws */
-        $this->Aws = (new ComponentCollection())
-            ->load('Aws.Aws');
+        $this->Aws = new AwsComponent(new ComponentCollection());
     }
 
     /**
@@ -67,7 +66,6 @@ class AmazonSesApiTransport extends AbstractTransport
             ];
         }
 
-        /** @var \Aws\SesV2\SesV2Client $sesV2Client */
         $sesV2Client = $this->Aws->createSesV2($clientConfig);
 
         // Extract all email properties
