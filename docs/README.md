@@ -6,6 +6,12 @@ It provides an `Aws` component that creates AWS service clients, an S3 stream wr
 (`s3://` paths), a session handler and a cache engine that store data in Amazon DynamoDB,
 and an email transport that sends email with the Amazon SES API v2.
 
+A lighter alternative based on [AsyncAws](https://async-aws.com) is
+[pieceofcake2/async-aws](https://github.com/pieceofcake2/async-aws). It provides the same
+features and installs only the AWS services you use, which keeps deployments small, for
+example on AWS Lambda. See
+[Migrating from pieceofcake2/aws](https://pieceofcake2.github.io/async-aws/#migrating-from-pieceofcake2aws).
+
 - [Installation](#installation)
 - [AWS Configuration](#aws-configuration)
 - [AWS Component](#aws-component)
