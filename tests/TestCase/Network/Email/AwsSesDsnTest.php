@@ -105,6 +105,18 @@ class AwsSesDsnTest extends CakeTestCase
         $this->assertSame('ssl://email-smtp.eu-west-1.amazonaws.com', AwsSesDsn::smtp($this->parts('ses+smtp'), [])['host']);
     }
 
+    public function testRegisterWithCallable(): void
+    {
+        $registered = null;
+        $this->assertTrue(AwsSesDsn::register(function (array $map) use (&$registered): void {
+            $registered = $map;
+        }));
+        $this->assertSame(AwsSesDsn::classMap(), $registered);
+        $this->assertSame(['ses', 'ses+api', 'ses+https', 'ses+smtp', 'ses+smtps'], array_keys($registered));
+        $this->assertSame([AwsSesDsn::class, 'api'], $registered['ses+api']);
+        $this->assertSame([AwsSesDsn::class, 'smtp'], $registered['ses+smtp']);
+    }
+
     public function testRegister(): void
     {
         if (!method_exists('CakeEmail', 'setDsnClassMap')) {
