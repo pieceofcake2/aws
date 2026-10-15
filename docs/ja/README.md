@@ -10,7 +10,7 @@ Amazon DynamoDB にデータを保存するセッションハンドラーとキ�
 [pieceofcake2/async-aws](https://github.com/pieceofcake2/async-aws) があります。同じ機能を提供し、
 使う AWS サービスだけをインストールするので、AWS Lambda などへのデプロイを小さく保てます。
 [pieceofcake2/aws からの移行](https://pieceofcake2.github.io/async-aws/migrating-from-aws.html)
-を参照してください。
+をご覧ください。
 
 - [インストール](#installation)
 - [AWS の設定](#aws-configuration)

@@ -32,7 +32,7 @@ Configure::write('Session', [
   期限切れになります。`Session.timeout` がない場合のデフォルトは `session.gc_maxlifetime` です。
 - テーブルは、`id` という名前の文字列型のパーティションキーを持つ状態で存在している必要があり、
   `expires` 属性で Time to Live が有効になっていなければなりません
-  ([セッションテーブルの作成](#creating-the-session-table) を参照してください)。
+  ([セッションテーブルの作成](#creating-the-session-table) をご覧ください)。
 - DynamoDB クライアントは `Aws` の設定で作成されます。そのため、セッションが開始される前に
   プラグインを読み込み、`Aws` を設定しておく必要があります。
 - 複数のアプリケーションでドメインとテーブルを共有する場合は、互いのセッションを読み込まないように、
