@@ -10,20 +10,33 @@ App::uses('CakeLog', 'Log');
 /**
  * Session connection used by `DynamoDbSession`
  *
- * Wraps the SDK's `StandardSessionConnection` or `LockingSessionConnection` and handles expired sessions:
+ * Wraps the SDK's `StandardSessionConnection` or `LockingSessionConnection`:
  *
- *  - `read()` returns no item for a session whose `expires` time has passed, and deletes it at once.
- *    The delete is best effort: a failure is logged with the `session` scope and never raised,
- *    and the delete is skipped when another request has renewed the session in the meantime.
- *  - The next `write()` of that session always writes the data, so an expired session that could not
- *    be deleted is never renewed with its old data.
- *  - `deleteExpired()` does nothing. It scans the whole table; DynamoDB's Time to Live removes
- *    the expired sessions instead.
+ *  - `read()` returns no item for a session whose `expires` time has passed. The item is not deleted;
+ *    DynamoDB's Time to Live removes it.
+ *  - The next `write()` of that session always writes the data, so an expired session is never renewed
+ *    with its old data.
+ *  - `deleteExpiredSessions()` scans the table for expired sessions and deletes them in batches. It is called by
+ *    `DynamoDbSession::gc()`, which PHP calls only when `session.gc_probability` is not 0.
  *
  * @internal
  */
 class DynamoDbSessionConnection implements SessionConnectionInterface
 {
+    /**
+     * Maximum number of delete requests in one BatchWriteItem call.
+     *
+     * @var int
+     */
+    public const BATCH_SIZE = 25;
+
+    /**
+     * Number of times unprocessed items of a BatchWriteItem call are sent again.
+     *
+     * @var int
+     */
+    public const BATCH_RETRIES = 3;
+
     /**
      * Session IDs (`<session name>_<session id>`) whose last read found an expired session.
      *
@@ -75,14 +88,19 @@ class DynamoDbSessionConnection implements SessionConnectionInterface
         unset($this->expired[$id]);
 
         $expires = $item[$this->getSessionLifetimeAttribute()] ?? null;
-        if ($expires === null || (int)$expires > time()) {
-            return $item;
+        if ($expires !== null && (int)$expires <= time()) {
+            // Time to Live removes the item; until then it is an empty session.
+            $this->expired[$id] = true;
+
+            return [];
+        }
+        if ($expires !== null) {
+            // The expiration time is checked here. SessionHandler::read() checks it again a moment later and
+            // would delete the session if it expired in between, so it must not see the real value.
+            $item[$this->getSessionLifetimeAttribute()] = PHP_INT_MAX;
         }
 
-        $this->expired[$id] = true;
-        $this->deleteExpiredItem($id, (int)$expires);
-
-        return [];
+        return $item;
     }
 
     /**
@@ -96,7 +114,7 @@ class DynamoDbSessionConnection implements SessionConnectionInterface
     public function write($id, $data, $isChanged)
     {
         if (isset($this->expired[$id])) {
-            // Replace the data of an expired session that could not be deleted, even when the new data is empty.
+            // Replace the data of the expired session, even when the new data is empty.
             $isChanged = true;
             unset($this->expired[$id]);
         }
@@ -118,41 +136,100 @@ class DynamoDbSessionConnection implements SessionConnectionInterface
     }
 
     /**
-     * Does nothing. Expired sessions are removed by the table's Time to Live and when they are read.
+     * Deletes the expired sessions. Called by `Aws\DynamoDb\SessionHandler::garbageCollect()`.
      *
      * @return bool
      */
     public function deleteExpired()
     {
+        $this->deleteExpiredSessions();
+
         return true;
     }
 
     /**
-     * Deletes an expired item unless another request renewed it. Failures are logged, not raised.
+     * Deletes the expired sessions: scans the whole table for items whose `expires` time has passed and
+     * deletes them with BatchWriteItem. Errors are logged with the `session` scope, never raised.
      *
-     * @param string $id Session ID (`<session name>_<session id>`)
-     * @param int $expires Expiration time read from the item
+     * @return int Number of deleted sessions
+     */
+    public function deleteExpiredSessions(): int
+    {
+        $table = $this->connection->getTableName();
+        $hashKey = $this->connection->getHashKey();
+        $deleted = 0;
+
+        try {
+            $pages = $this->client->getPaginator('Scan', [
+                'TableName' => $table,
+                'ProjectionExpression' => '#id',
+                'FilterExpression' => '#expires <= :now',
+                'ExpressionAttributeNames' => ['#id' => $hashKey, '#expires' => $this->getSessionLifetimeAttribute()],
+                'ExpressionAttributeValues' => [':now' => ['N' => (string)time()]],
+            ]);
+            foreach ($pages as $page) {
+                $requests = [];
+                foreach ($page['Items'] ?? [] as $item) {
+                    $requests[] = ['DeleteRequest' => ['Key' => [$hashKey => $item[$hashKey]]]];
+                }
+                foreach (array_chunk($requests, self::BATCH_SIZE) as $chunk) {
+                    $deleted += $this->batchDelete($table, $chunk);
+                }
+            }
+        } catch (AwsException $e) {
+            $this->logGcError($table, $e);
+        }
+
+        return $deleted;
+    }
+
+    /**
+     * Sends delete requests with BatchWriteItem, sending unprocessed items again a limited number of times.
+     *
+     * @param string $table Table name
+     * @param array<array<string, mixed>> $requests Delete requests (at most 25)
+     * @return int Number of processed requests
+     */
+    private function batchDelete(string $table, array $requests): int
+    {
+        $total = count($requests);
+        for ($attempt = 0; $requests && $attempt <= self::BATCH_RETRIES; $attempt++) {
+            if ($attempt > 0) {
+                usleep(50000 * 2 ** ($attempt - 1));
+            }
+            try {
+                $result = $this->client->batchWriteItem(['RequestItems' => [$table => $requests]]);
+            } catch (AwsException $e) {
+                $this->logGcError($table, $e);
+                break;
+            }
+            $requests = $result['UnprocessedItems'][$table] ?? [];
+        }
+
+        if ($requests) {
+            CakeLog::write(LOG_WARNING, sprintf(
+                'DynamoDB session garbage collection could not delete %d expired sessions from table "%s".',
+                count($requests),
+                $table,
+            ), ['session']);
+        }
+
+        return $total - count($requests);
+    }
+
+    /**
+     * Logs an error of the garbage collection.
+     *
+     * @param string $table Table name
+     * @param \Aws\Exception\AwsException $e Error
      * @return void
      */
-    private function deleteExpiredItem(string $id, int $expires): void
+    private function logGcError(string $table, AwsException $e): void
     {
-        try {
-            $this->client->deleteItem([
-                'TableName' => $this->connection->getTableName(),
-                'Key' => [$this->connection->getHashKey() => ['S' => $id]],
-                'ConditionExpression' => '#expires = :expires',
-                'ExpressionAttributeNames' => ['#expires' => $this->getSessionLifetimeAttribute()],
-                'ExpressionAttributeValues' => [':expires' => ['N' => (string)$expires]],
-            ]);
-        } catch (AwsException $e) {
-            if ($e->getAwsErrorCode() !== 'ConditionalCheckFailedException') {
-                CakeLog::write(LOG_WARNING, sprintf(
-                    'DynamoDB session could not delete expired session "%s" from table "%s": %s',
-                    $id,
-                    $this->connection->getTableName(),
-                    $e->getAwsErrorMessage() ?: $e->getMessage(),
-                ), ['session']);
-            }
-        }
+        CakeLog::write(LOG_WARNING, sprintf(
+            'DynamoDB session garbage collection of table "%s" failed: %s',
+            $table,
+            $e->getAwsErrorMessage() ?: $e->getMessage(),
+        ), ['session']);
     }
 }

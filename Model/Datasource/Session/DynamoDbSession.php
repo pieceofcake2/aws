@@ -1,9 +1,11 @@
 <?php
 
+use Aws\CommandInterface;
 use Aws\DynamoDb\DynamoDbClient;
 use Aws\DynamoDb\LockingSessionConnection;
 use Aws\DynamoDb\SessionHandler;
 use Aws\DynamoDb\StandardSessionConnection;
+use Aws\Middleware;
 
 App::uses('CakeSessionHandlerInterface', 'Model/Datasource/Session');
 App::uses('ComponentCollection', 'Controller');
@@ -18,19 +20,21 @@ App::uses('DynamoDbSessionConnection', 'Aws.Model/Datasource/Session');
  * Configure the table with `Session.handler.table_name`. Other keys of `Session.handler` (except `engine`)
  * are passed to the SDK's session handler (e.g. `locking`, `session_lifetime`, `consistent_read`).
  *
- * Each write stores the expiration time in the `expires` attribute: the current time plus `session_lifetime`,
- * which defaults to `Session.timeout` minutes (the timeout CakeSession checks), or `session.gc_maxlifetime`
- * when `Session.timeout` is not set. Expired sessions are removed without PHP's garbage collection:
+ * Each write and close stores the expiration time in the `expires` attribute: the current time plus
+ * `session_lifetime`, which defaults to `Session.timeout` minutes (the timeout CakeSession checks), or
+ * `session.gc_maxlifetime` when `Session.timeout` is not set.
  *
- *  - DynamoDB's Time to Live removes them; enable it on the table with the `expires` attribute.
- *  - Time to Live can take a few days, so `read()` treats an expired session as empty and deletes it at once
- *    (best effort: a failure is logged with the `session` scope).
- *  - `gc()` does nothing; it never scans the table. This handler turns off PHP's garbage collection
- *    (`session.gc_probability = 0`) because it would never remove anything.
+ *  - DynamoDB's Time to Live removes expired sessions; enable it on the table with the `expires` attribute.
+ *  - Time to Live is lazy, so `read()` treats an expired session as empty until it is removed, and the next
+ *    write replaces its data.
+ *  - `gc()` scans the table and deletes the expired sessions. It is off by default: unless `Session.ini`
+ *    contains `session.gc_probability`, this handler sets `session.gc_probability` to 0.
  */
 class DynamoDbSession implements CakeSessionHandlerInterface
 {
     private SessionHandler $handler;
+
+    private DynamoDbSessionConnection $connection;
 
     /**
      * Constructor
@@ -46,6 +50,7 @@ class DynamoDbSession implements CakeSessionHandlerInterface
         }
 
         $dynamoDbClient ??= (new AwsComponent(new ComponentCollection()))->createDynamoDb();
+        static::addDefaultUpdateAction($dynamoDbClient);
 
         $options = array_diff_key((array)Configure::read('Session.handler'), array_flip(['engine', 'table_name']));
 
@@ -58,12 +63,37 @@ class DynamoDbSession implements CakeSessionHandlerInterface
             : new StandardSessionConnection($dynamoDbClient, $config);
 
         // CakeSession registers this class as the save handler, so the SDK's handler must not register itself.
-        $this->handler = new SessionHandler(new DynamoDbSessionConnection($connection, $dynamoDbClient));
+        $this->connection = new DynamoDbSessionConnection($connection, $dynamoDbClient);
+        $this->handler = new SessionHandler($this->connection);
 
-        // gc() does nothing; expired sessions are removed by the table's Time to Live (`expires`) and on read.
-        if (session_status() !== PHP_SESSION_ACTIVE) {
+        // Expired sessions are removed by the table's Time to Live (`expires`). gc() scans the whole table,
+        // so PHP calls it only when the application configures `session.gc_probability`.
+        if (!isset(((array)Configure::read('Session.ini'))['session.gc_probability']) && session_status() !== PHP_SESSION_ACTIVE) {
             ini_set('session.gc_probability', '0');
         }
+    }
+
+    /**
+     * Adds `'Action' => 'PUT'` to the `AttributeUpdates` that the SDK's session handler sends without an action.
+     *
+     * DynamoDB uses PUT when the action is missing, but DynamoDB Local does not, so sessions would not be stored there.
+     *
+     * @param \Aws\DynamoDb\DynamoDbClient $client DynamoDB client
+     * @return void
+     */
+    protected static function addDefaultUpdateAction(DynamoDbClient $client): void
+    {
+        $client->getHandlerList()->appendInit(Middleware::mapCommand(function (CommandInterface $command) {
+            if ($command->getName() === 'UpdateItem' && isset($command['AttributeUpdates'])) {
+                $updates = $command['AttributeUpdates'];
+                foreach ($updates as $name => $update) {
+                    $updates[$name] += ['Action' => 'PUT'];
+                }
+                $command['AttributeUpdates'] = $updates;
+            }
+
+            return $command;
+        }), 'session_default_update_action');
     }
 
     /**
@@ -106,7 +136,7 @@ class DynamoDbSession implements CakeSessionHandlerInterface
     /**
      * Method used to read from a session.
      *
-     * An expired session is read as empty and deleted.
+     * An expired session is read as empty. It is not deleted; the table's Time to Live removes it.
      *
      * @param string $id The key of the value to read
      * @return mixed The session data, or an empty string if it does not exist or has expired
@@ -142,14 +172,19 @@ class DynamoDbSession implements CakeSessionHandlerInterface
     /**
      * Run the Garbage collection on the session storage.
      *
-     * Does nothing and never scans the table. Expired sessions are removed by the table's Time to Live
-     * (`expires`) and when they are read.
+     * Scans the whole table and deletes the sessions whose `expires` time has passed, in batches of 25.
+     * Errors are logged with the `session` scope, never raised.
      *
-     * @param int $expires Timestamp (defaults to current time)
+     * PHP calls this only when `session.gc_probability` is not 0, which this handler sets by default:
+     * normally, the table's Time to Live (`expires`) removes the expired sessions.
+     *
+     * @param int $expires Not used; the expiration time of each session is stored in its item
      * @return bool Success
      */
     public function gc($expires = null): bool
     {
+        $this->connection->deleteExpiredSessions();
+
         return true;
     }
 }

@@ -3,9 +3,11 @@
 use Aws\CommandInterface;
 use Aws\DynamoDb\DynamoDbClient;
 use Aws\DynamoDb\Exception\DynamoDbException;
+use Aws\DynamoDb\SessionHandler;
 use Aws\DynamoDb\StandardSessionConnection;
 use Aws\MockHandler;
 use Aws\Result;
+use Psr\Http\Message\RequestInterface;
 
 App::uses('CakeLog', 'Log');
 App::uses('CakeLogInterface', 'Log');
@@ -37,16 +39,27 @@ class DynamoDbSessionTest extends CakeTestCase
 
     private array $disabledLogs = [];
 
+    /**
+     * @var array<\Aws\CommandInterface>
+     */
+    private array $commands = [];
+
     public function setUp(): void
     {
         parent::setUp();
         $this->sessionConfig = (array)Configure::read('Session');
         $this->mock = new MockHandler();
+        $this->commands = [];
+        $mock = $this->mock;
         Configure::write('Aws', [
             'region' => 'ap-northeast-1',
             'version' => 'latest',
             'credentials' => ['key' => 'test-key', 'secret' => 'test-secret'],
-            'handler' => $this->mock,
+            'handler' => function (CommandInterface $command, RequestInterface $request) use ($mock) {
+                $this->commands[] = $command;
+
+                return $mock($command, $request);
+            },
         ]);
         Configure::write('Session.handler.table_name', 'sessions');
 
@@ -76,6 +89,29 @@ class DynamoDbSessionTest extends CakeTestCase
         return function (CommandInterface $command) use ($code) {
             return new DynamoDbException($code, $command, ['code' => $code, 'message' => $code . ' message']);
         };
+    }
+
+    /**
+     * @return array<string>
+     */
+    private function commandNames(): array
+    {
+        return array_map(fn(CommandInterface $command) => $command->getName(), $this->commands);
+    }
+
+    private function scanPage(array $ids, ?string $lastKey = null): Result
+    {
+        $page = ['Items' => array_map(fn(string $id) => ['id' => ['S' => $id]], $ids)];
+        if ($lastKey !== null) {
+            $page['LastEvaluatedKey'] = ['id' => ['S' => $lastKey]];
+        }
+
+        return new Result($page);
+    }
+
+    private function deletedIds(CommandInterface $command): array
+    {
+        return array_map(fn(array $request) => $request['DeleteRequest']['Key']['id']['S'], $command['RequestItems']['sessions']);
     }
 
     private function item(string $data, int $expires): Result
@@ -130,6 +166,31 @@ class DynamoDbSessionTest extends CakeTestCase
         } finally {
             ini_set('session.gc_probability', (string)$before);
         }
+    }
+
+    public function testConstructKeepsConfiguredGcProbability(): void
+    {
+        Configure::write('Session.ini', ['session.gc_probability' => 1]);
+        $before = ini_get('session.gc_probability');
+        ini_set('session.gc_probability', '1');
+        try {
+            new DynamoDbSession();
+
+            $this->assertSame('1', ini_get('session.gc_probability'));
+        } finally {
+            ini_set('session.gc_probability', (string)$before);
+        }
+    }
+
+    public function testUpdateItemWithoutActionGetsPut(): void
+    {
+        // The SDK's handler relies on the default action, which DynamoDB Local does not apply.
+        $this->mock->append(new Result([]), new Result([]));
+
+        $session = $this->openSession();
+        $session->read('abc');
+
+        $this->assertSame(['Value' => ['N' => '1'], 'Action' => 'PUT'], $this->lastCommand()['AttributeUpdates']['lock']);
     }
 
     public function testInjectedClient(): void
@@ -199,76 +260,46 @@ class DynamoDbSessionTest extends CakeTestCase
 
     public function testReadExpired(): void
     {
-        $expires = time() - 60;
-        $this->mock->append($this->item('serialized', $expires), new Result([]));
+        $this->mock->append($this->item('serialized', time() - 60));
 
         $this->assertSame('', $this->openSession()->read('abc'));
 
-        $command = $this->lastCommand();
-        $this->assertSame('DeleteItem', $command->getName());
-        $this->assertSame('sessions', $command['TableName']);
-        $this->assertSame(['id' => ['S' => session_name() . '_abc']], $command['Key']);
-        $this->assertSame('#expires = :expires', $command['ConditionExpression']);
-        $this->assertSame(['#expires' => 'expires'], $command['ExpressionAttributeNames']);
-        $this->assertSame([':expires' => ['N' => (string)$expires]], $command['ExpressionAttributeValues']);
-        $this->assertCount(0, $this->mock);
+        // The item is left to Time to Live.
+        $this->assertSame(['UpdateItem'], $this->commandNames());
         $this->assertSame([], DynamoDbSessionTestLog::$messages);
     }
 
     public function testReadExpiredWithoutLocking(): void
     {
         Configure::write('Session.handler.locking', false);
-        $this->mock->append(
-            new Result(['Item' => ['data' => ['S' => 'serialized'], 'expires' => ['N' => (string)(time() - 1)]]]),
-            new Result([]),
-        );
+        $this->mock->append(new Result(['Item' => ['data' => ['S' => 'serialized'], 'expires' => ['N' => (string)(time() - 1)]]]));
 
         $this->assertSame('', $this->openSession()->read('abc'));
-        $this->assertSame('DeleteItem', $this->lastCommand()->getName());
+        $this->assertSame(['GetItem'], $this->commandNames());
     }
 
     public function testReadExpiresWhenTheExpirationTimeIsReached(): void
     {
-        $this->mock->append($this->item('serialized', time()), new Result([]));
+        $this->mock->append($this->item('serialized', time()));
 
         $this->assertSame('', $this->openSession()->read('abc'));
-        $this->assertSame('DeleteItem', $this->lastCommand()->getName());
+        $this->assertSame(['UpdateItem'], $this->commandNames());
     }
 
-    public function testReadExpiredWithoutData(): void
+    public function testReadSessionExpiringDuringTheReadIsNotDeleted(): void
     {
-        $this->mock->append(new Result(['Attributes' => ['expires' => ['N' => (string)(time() - 60)]]]), new Result([]));
+        // SessionHandler::read() checks the expiration time again after the connection; it must not delete the session.
+        $this->mock->append($this->item('serialized', time() + 1));
 
-        $this->assertSame('', $this->openSession()->read('abc'));
-        $this->assertSame('DeleteItem', $this->lastCommand()->getName());
+        $session = $this->openSession();
+        $this->assertSame('serialized', $session->read('abc'));
+        $this->assertSame(['UpdateItem'], $this->commandNames());
     }
 
-    public function testReadExpiredDeleteFailureIsLogged(): void
+    public function testWriteAfterExpiredReadClearsTheData(): void
     {
-        $this->mock->append($this->item('serialized', time() - 60), $this->error('AccessDeniedException'));
-
-        $this->assertSame('', $this->openSession()->read('abc'));
-
-        $this->assertCount(1, DynamoDbSessionTestLog::$messages);
-        $this->assertStringContainsString('warning: DynamoDB session could not delete expired session "' . session_name() . '_abc" from table "sessions"', DynamoDbSessionTestLog::$messages[0]);
-        $this->assertStringContainsString('AccessDeniedException message', DynamoDbSessionTestLog::$messages[0]);
-    }
-
-    public function testReadExpiredRenewedByAnotherRequestIsNotLogged(): void
-    {
-        $this->mock->append($this->item('serialized', time() - 60), $this->error('ConditionalCheckFailedException'));
-
-        $this->assertSame('', $this->openSession()->read('abc'));
-        $this->assertSame([], DynamoDbSessionTestLog::$messages);
-    }
-
-    public function testWriteAfterExpiredReadReplacesTheData(): void
-    {
-        $this->mock->append(
-            $this->item('serialized', time() - 60),
-            $this->error('AccessDeniedException'),
-            new Result([]),
-        );
+        Configure::write('Session.timeout', 60);
+        $this->mock->append($this->item('serialized', time() - 60), new Result([]));
 
         $session = $this->openSession();
         $this->assertSame('', $session->read('abc'));
@@ -278,12 +309,24 @@ class DynamoDbSessionTest extends CakeTestCase
         $command = $this->lastCommand();
         $this->assertSame('UpdateItem', $command->getName());
         $this->assertSame(['Action' => 'DELETE'], $command['AttributeUpdates']['data']);
-        $this->assertArrayHasKey('expires', $command['AttributeUpdates']);
+        $this->assertSame('PUT', $command['AttributeUpdates']['expires']['Action']);
+        $this->assertEqualsWithDelta(time() + 3600, (int)$command['AttributeUpdates']['expires']['Value']['N'], 5);
     }
 
-    public function testCloseAfterExpiredReadReplacesTheData(): void
+    public function testWriteAfterExpiredReadWritesTheSameData(): void
     {
-        $this->mock->append($this->item('serialized', time() - 60), new Result([]), new Result([]));
+        $this->mock->append($this->item('serialized', time() - 60), new Result([]));
+
+        $session = $this->openSession();
+        $this->assertSame('', $session->read('abc'));
+        $this->assertTrue($session->write('abc', 'serialized'));
+
+        $this->assertSame(['Value' => ['S' => 'serialized'], 'Action' => 'PUT'], $this->lastCommand()['AttributeUpdates']['data']);
+    }
+
+    public function testCloseAfterExpiredReadClearsTheData(): void
+    {
+        $this->mock->append($this->item('serialized', time() - 60), new Result([]));
 
         $session = $this->openSession();
         $this->assertSame('', $session->read((string)session_id()));
@@ -317,7 +360,7 @@ class DynamoDbSessionTest extends CakeTestCase
         $command = $this->lastCommand();
         $this->assertSame('UpdateItem', $command->getName());
         $this->assertSame(['id' => ['S' => session_name() . '_abc']], $command['Key']);
-        $this->assertSame(['Value' => ['S' => 'serialized']], $command['AttributeUpdates']['data']);
+        $this->assertSame(['Value' => ['S' => 'serialized'], 'Action' => 'PUT'], $command['AttributeUpdates']['data']);
         $this->assertSame(['Action' => 'DELETE'], $command['AttributeUpdates']['lock']);
     }
 
@@ -368,21 +411,115 @@ class DynamoDbSessionTest extends CakeTestCase
         $this->assertSame('UpdateItem', $this->lastCommand()->getName());
     }
 
-    public function testGcDoesNotCallDynamoDb(): void
+    public function testGcDeletesExpiredSessionsOfAllScanPages(): void
     {
-        $this->mock->append(new Result([]));
+        $this->mock->append(
+            $this->scanPage(['s_1', 's_2'], 's_2'),
+            new Result([]),
+            $this->scanPage(['s_3']),
+            new Result([]),
+        );
 
-        $this->assertTrue($this->openSession()->gc(time()));
-        $this->assertTrue($this->openSession()->gc());
-        $this->assertCount(1, $this->mock);
+        $this->assertTrue($this->openSession()->gc(1440));
+
+        $this->assertSame(['Scan', 'BatchWriteItem', 'Scan', 'BatchWriteItem'], $this->commandNames());
+        $scan = $this->commands[0];
+        $this->assertSame('sessions', $scan['TableName']);
+        $this->assertSame('#expires <= :now', $scan['FilterExpression']);
+        $this->assertSame(['#id' => 'id', '#expires' => 'expires'], $scan['ExpressionAttributeNames']);
+        $this->assertEqualsWithDelta(time(), (int)$scan['ExpressionAttributeValues'][':now']['N'], 5);
+        $this->assertSame('#id', $scan['ProjectionExpression']);
+        $this->assertSame(['id' => ['S' => 's_2']], $this->commands[2]['ExclusiveStartKey']);
+        $this->assertSame(['s_1', 's_2'], $this->deletedIds($this->commands[1]));
+        $this->assertSame(['s_3'], $this->deletedIds($this->commands[3]));
+        $this->assertSame([], DynamoDbSessionTestLog::$messages);
     }
 
-    public function testConnectionDeleteExpiredDoesNotScan(): void
+    public function testGcDeletesInBatchesOf25(): void
     {
+        $ids = array_map(fn(int $i) => 's_' . $i, range(1, 30));
+        $this->mock->append($this->scanPage($ids), new Result([]), new Result([]));
+
+        $connection = $this->connection();
+        $this->assertSame(30, $connection->deleteExpiredSessions());
+
+        $this->assertSame(['Scan', 'BatchWriteItem', 'BatchWriteItem'], $this->commandNames());
+        $this->assertSame(array_slice($ids, 0, 25), $this->deletedIds($this->commands[1]));
+        $this->assertSame(array_slice($ids, 25), $this->deletedIds($this->commands[2]));
+    }
+
+    public function testGcRetriesUnprocessedItems(): void
+    {
+        $unprocessed = ['sessions' => [['DeleteRequest' => ['Key' => ['id' => ['S' => 's_2']]]]]];
+        $this->mock->append(
+            $this->scanPage(['s_1', 's_2']),
+            new Result(['UnprocessedItems' => $unprocessed]),
+            new Result(['UnprocessedItems' => []]),
+        );
+
+        $this->assertSame(2, $this->connection()->deleteExpiredSessions());
+
+        $this->assertSame(['Scan', 'BatchWriteItem', 'BatchWriteItem'], $this->commandNames());
+        $this->assertSame(['s_2'], $this->deletedIds($this->commands[2]));
+        $this->assertSame([], DynamoDbSessionTestLog::$messages);
+    }
+
+    public function testGcGivesUpOnUnprocessedItems(): void
+    {
+        $unprocessed = ['sessions' => [['DeleteRequest' => ['Key' => ['id' => ['S' => 's_2']]]]]];
+        $this->mock->append($this->scanPage(['s_1', 's_2']));
+        for ($i = 0; $i <= DynamoDbSessionConnection::BATCH_RETRIES; $i++) {
+            $this->mock->append(new Result(['UnprocessedItems' => $unprocessed]));
+        }
+
+        $this->assertSame(1, $this->connection()->deleteExpiredSessions());
+
+        $this->assertCount(2 + DynamoDbSessionConnection::BATCH_RETRIES, $this->commands);
+        $this->assertSame(['warning: DynamoDB session garbage collection could not delete 1 expired sessions from table "sessions".'], DynamoDbSessionTestLog::$messages);
+    }
+
+    public function testGcScanFailureIsLogged(): void
+    {
+        $this->mock->append($this->error('AccessDeniedException'));
+
+        $this->assertTrue($this->openSession()->gc());
+
+        $this->assertSame(['warning: DynamoDB session garbage collection of table "sessions" failed: AccessDeniedException message'], DynamoDbSessionTestLog::$messages);
+    }
+
+    public function testGcBatchFailureIsLogged(): void
+    {
+        $this->mock->append($this->scanPage(['s_1']), $this->error('AccessDeniedException'));
+
+        $this->assertSame(0, $this->connection()->deleteExpiredSessions());
+
+        $this->assertCount(2, DynamoDbSessionTestLog::$messages);
+        $this->assertStringContainsString('AccessDeniedException message', DynamoDbSessionTestLog::$messages[0]);
+    }
+
+    public function testGcWithoutExpiredSessions(): void
+    {
+        $this->mock->append($this->scanPage([]));
+
+        $this->assertTrue($this->openSession()->gc());
+        $this->assertSame(['Scan'], $this->commandNames());
+    }
+
+    public function testSdkGarbageCollectUsesTheSameDeletion(): void
+    {
+        $this->mock->append($this->scanPage(['s_1']), new Result([]));
         $client = new DynamoDbClient((array)Configure::read('Aws'));
         $connection = new DynamoDbSessionConnection(new StandardSessionConnection($client, ['table_name' => 'sessions']), $client);
 
-        $this->assertTrue($connection->deleteExpired());
-        $this->assertCount(0, $this->mock);
+        (new SessionHandler($connection))->garbageCollect();
+
+        $this->assertSame(['Scan', 'BatchWriteItem'], $this->commandNames());
+    }
+
+    private function connection(): DynamoDbSessionConnection
+    {
+        $client = new DynamoDbClient((array)Configure::read('Aws'));
+
+        return new DynamoDbSessionConnection(new StandardSessionConnection($client, ['table_name' => 'sessions']), $client);
     }
 }
