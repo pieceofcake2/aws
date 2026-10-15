@@ -23,6 +23,8 @@ class AmazonSesApiTransport extends AbstractTransport
         'region' => null,
         'key' => null,
         'secret' => null,
+        'token' => null,
+        'endpoint' => null,
     ];
 
     private AwsComponent $Aws;
@@ -59,11 +61,17 @@ class AmazonSesApiTransport extends AbstractTransport
         if (!empty($this->_config['version'])) {
             $clientConfig['version'] = $this->_config['version'];
         }
+        if (!empty($this->_config['endpoint'])) {
+            $clientConfig['endpoint'] = $this->_config['endpoint'];
+        }
         if (!empty($this->_config['key']) && !empty($this->_config['secret'])) {
             $clientConfig['credentials'] = [
                 'key' => $this->_config['key'],
                 'secret' => $this->_config['secret'],
             ];
+            if (!empty($this->_config['token'])) {
+                $clientConfig['credentials']['token'] = $this->_config['token'];
+            }
         }
 
         $sesV2Client = $this->Aws->createSesV2($clientConfig);

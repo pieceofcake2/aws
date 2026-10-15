@@ -46,7 +46,7 @@ composer require pieceofcake2/aws
 CakePlugin::load('Aws');
 ```
 
-[S3 ストリームラッパー](s3.md) も登録するには、プラグインをその bootstrap とともに読み込みます。
+[S3 ストリームラッパー](s3.md) と [Amazon SES のメーラーの DSN](email.md#mailer-dsn) も登録するには、プラグインをその bootstrap とともに読み込みます。
 
 ```php
 CakePlugin::load('Aws', ['bootstrap' => true]);

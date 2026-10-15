@@ -44,8 +44,8 @@ If you already use `CakePlugin::loadAll()`, this is not necessary:
 CakePlugin::load('Aws');
 ```
 
-To also register the [S3 stream wrapper](s3.md), load the plugin with its
-bootstrap:
+To also register the [S3 stream wrapper](s3.md) and the
+[Amazon SES mailer DSNs](email.md#mailer-dsn), load the plugin with its bootstrap:
 
 ```php
 CakePlugin::load('Aws', ['bootstrap' => true]);

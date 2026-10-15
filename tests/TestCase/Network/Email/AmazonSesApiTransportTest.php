@@ -143,4 +143,25 @@ class AmazonSesApiTransportTest extends CakeTestCase
         $this->assertStringContainsString('email.us-west-2.amazonaws.com', (string)$this->request->getUri());
         $this->assertStringContainsString('Credential=transport-key/', $this->request->getHeaderLine('Authorization'));
     }
+
+    public function testSendWithSessionTokenAndEndpoint(): void
+    {
+        $this->mock->append(new Result(['MessageId' => 'message-id']));
+
+        $this->email([
+            'region' => 'us-west-2',
+            'key' => 'transport-key',
+            'secret' => 'transport-secret',
+            'token' => 'session-token',
+            'endpoint' => 'https://ses.example.com:8443',
+        ])
+            ->from('from@example.com')
+            ->to('to@example.com')
+            ->subject('Hello')
+            ->send('Body');
+
+        $this->assertSame('ses.example.com', $this->request->getUri()->getHost());
+        $this->assertSame(8443, $this->request->getUri()->getPort());
+        $this->assertSame('session-token', $this->request->getHeaderLine('X-Amz-Security-Token'));
+    }
 }
