@@ -361,3 +361,8 @@ $messageId = $result['id'];
 ```
 
 The sender address (`from`) must be verified in SES.
+
+## Origin
+
+This package was created by [pieceofcake2](https://github.com/pieceofcake2), which also maintains
+it. It is not a fork of another project and is not based on one.
