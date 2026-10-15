@@ -17,6 +17,13 @@ A lighter alternative based on [AsyncAws](https://async-aws.com):
 [pieceofcake2/async-aws](https://github.com/pieceofcake2/async-aws). It provides the same
 features and installs only the AWS services you use.
 
+## Documentation
+
+- Website: https://pieceofcake2.github.io/aws/
+- Markdown: [docs/README.md](docs/README.md) (for AI tools and offline reading)
+
+The Markdown documentation is also included in the Composer package, in the plugin's directory: `plugins/Aws/docs/README.md` (the location depends on your `installer-paths`). Install the package with `--dev` if you only need it for development.
+
 ## Requirements
 
 - PHP 8.1+
@@ -29,10 +36,6 @@ composer require pieceofcake2/aws
 ```
 
 Then load the plugin with `CakePlugin::load('Aws')`.
-
-## Documentation
-
-Documentation: https://pieceofcake2.github.io/aws/
 
 ## Contributing
 
