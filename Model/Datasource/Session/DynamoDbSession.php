@@ -83,6 +83,9 @@ class DynamoDbSession implements CakeSessionHandlerInterface
      */
     protected static function addDefaultUpdateAction(DynamoDbClient $client): void
     {
+        if ($client->getHandlerList()->hasMiddleware('session_default_update_action')) {
+            return;
+        }
         $client->getHandlerList()->appendInit(Middleware::mapCommand(function (CommandInterface $command) {
             if ($command->getName() === 'UpdateItem' && isset($command['AttributeUpdates'])) {
                 $updates = $command['AttributeUpdates'];
