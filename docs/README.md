@@ -133,11 +133,12 @@ Configure::write('Session', [
         // Optional: other options of Aws\DynamoDb\SessionHandler (default: 'locking' => true)
         // 'locking' => true,
     ],
+    // Minutes; also the lifetime written to the "expires" attribute of each item
     'timeout' => 1440,
     'ini' => [
         'session.cookie_lifetime' => 0,
-        // Written to the "expires" attribute of each item
-        'session.gc_maxlifetime' => 259200,
+        // Expired sessions are removed by Time to Live, not by PHP's garbage collection
+        'session.gc_probability' => 0,
     ],
 ]);
 ```
@@ -146,23 +147,54 @@ Configure::write('Session', [
 - The other keys of `handler` (except `engine`) are passed to the SDK's session handler, for
   example `locking`, `session_lifetime` or `consistent_read`. Session locking is enabled
   unless you set `'locking' => false`.
-- The table must exist, with a string partition key named `id`.
+- `session_lifetime` is the number of seconds until a session expires. It defaults to
+  `Session.timeout` minutes, the timeout that `CakeSession` checks, so a session item expires
+  together with the session. Without `Session.timeout`, it defaults to
+  `session.gc_maxlifetime`.
+- The table must exist, with a string partition key named `id`, and Time to Live should be
+  enabled on the `expires` attribute (see [Creating the Session Table](#creating-the-session-table)).
 - The DynamoDB client is created with the `Aws` configuration, so the plugin must be loaded
   and `Aws` configured before the session starts.
 - If several applications share a domain and a table, give each application its own session
   cookie name (`Session.cookie`) so that they do not read each other's sessions.
 
-### Removing Expired Sessions
+The items are those of the AWS SDK's session handler: the key is
+`<session name>_<session id>`, the data is a string, the expiration time is a Unix timestamp in
+`expires`, and a `lock` attribute marks a locked session. pieceofcake2/async-aws writes the same
+items, so both plugins can use the same table.
 
-`Aws\DynamoDb\SessionHandler::gc()` does nothing, so PHP's garbage collection never removes
-expired sessions, and `DynamoDbSession` turns it off (`session.gc_probability = 0`). Enable
-[Time to Live](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/TTL.html) on
-the table with the `expires` attribute, and DynamoDB removes the expired sessions:
+### Creating the Session Table
+
+Create the table and enable Time to Live with the AWS CLI:
 
 ```bash
+aws dynamodb create-table --table-name DYNAMODB_TABLE_NAME \
+    --attribute-definitions AttributeName=id,AttributeType=S \
+    --key-schema AttributeName=id,KeyType=HASH \
+    --billing-mode PAY_PER_REQUEST
 aws dynamodb update-time-to-live --table-name DYNAMODB_TABLE_NAME \
     --time-to-live-specification "Enabled=true,AttributeName=expires"
 ```
+
+### Removing Expired Sessions
+
+PHP's garbage collection is not used. Expired sessions are removed in two ways instead:
+
+- Each write and close of a session stores its expiration time (the current time plus
+  `session_lifetime`) in the `expires` attribute, and DynamoDB's
+  [Time to Live](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/TTL.html)
+  deletes the item after that time. Time to Live runs in the background and usually deletes
+  expired items within a few days.
+- Until then, reading a session whose `expires` time has passed returns an empty session and
+  deletes the item at once, so an expired session is never used again. This delete is best
+  effort: a failure is logged with the `session` scope and does not interrupt the request, and
+  the data of the expired session is removed when the empty session is written.
+
+`gc()` does nothing, so it never scans the table. Set `session.gc_probability` to `0` as in the
+example above; `DynamoDbSession` also sets it when it is created, because a call to `gc()` would
+not remove anything. Do not call the SDK's `SessionHandler::garbageCollect()` either: it scans
+the whole table, which is slow and expensive on a large table, and Time to Live removes the same
+items without any cost.
 
 ## DynamoDB Cache
 
