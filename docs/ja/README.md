@@ -9,7 +9,7 @@ Amazon DynamoDB にデータを保存するセッションハンドラーとキ�
 [AsyncAws](https://async-aws.com) をベースにした軽量な代替として
 [pieceofcake2/async-aws](https://github.com/pieceofcake2/async-aws) があります。同じ機能を提供し、
 使う AWS サービスだけをインストールするので、AWS Lambda などへのデプロイを小さく保てます。
-[Migrating from pieceofcake2/aws](https://pieceofcake2.github.io/async-aws/migrating-from-aws.html)
+[pieceofcake2/aws からの移行](https://pieceofcake2.github.io/async-aws/migrating-from-aws.html)
 を参照してください。
 
 - [インストール](#installation)
@@ -34,12 +34,12 @@ composer require pieceofcake2/aws
 インストールされます。正しい場所にインストールされるように、アプリケーションの `composer.json` で
 `installer-paths` を設定してください。
 
-| レイアウト | `installer-paths` |
+| 構成 | `installer-paths` |
 | --- | --- |
-| モダン (`config/`, `src/`, `templates/`, `plugins/`) | `"plugins/{$name}/": ["type:cakephp-plugin"]` |
-| レガシー (`app/Config/`, `app/Plugin/`) | `"app/Plugin/{$name}/": ["type:cakephp-plugin"]` |
+| モダン (`config/`、`src/`、`templates/`、`plugins/`) | `"plugins/{$name}/": ["type:cakephp-plugin"]` |
+| レガシー (`app/Config/`、`app/Plugin/`) | `"app/Plugin/{$name}/": ["type:cakephp-plugin"]` |
 
-`config/bootstrap.php` (レガシーレイアウトでは `app/Config/bootstrap.php`) でプラグインを読み込みます。
+`config/bootstrap.php` (レガシー構成では `app/Config/bootstrap.php`) でプラグインを読み込みます。
 すでに `CakePlugin::loadAll()` を使っている場合は不要です。
 
 ```php
@@ -57,7 +57,7 @@ CakePlugin::load('Aws', ['bootstrap' => true]);
 ## AWS の設定
 
 すべてのクライアントは `Aws` の設定から作成されます。この設定は SDK の共通設定として `Aws\Sdk` に
-渡されます。`config/core.php` (レガシーレイアウトでは `app/Config/core.php`) か、プラグインを読み込む
+渡されます。`config/core.php` (レガシー構成では `app/Config/core.php`) か、プラグインを読み込む
 前の `config/bootstrap.php` で設定します。
 
 ```php

@@ -1,7 +1,7 @@
 # DynamoDB キャッシュ
 
 `Aws.DynamoDb` は、キャッシュのエントリーを DynamoDB のテーブルに保存するキャッシュエンジンです。
-プラグインを読み込み、`Aws` を設定した後に、`config/bootstrap.php` (レガシーレイアウトでは
+プラグインを読み込み、`Aws` を設定した後に、`config/bootstrap.php` (レガシー構成では
 `app/Config/bootstrap.php`) で `Cache::config()` を使って設定します。
 
 ```php
@@ -15,7 +15,7 @@ Cache::config('default', [
 
 | キー | デフォルト | 説明 |
 | --- | --- | --- |
-| `table` | (必須) | DynamoDB のテーブル名。指定しないと `Cache::config()` が `CacheException` をスローします。 |
+| `table` | (必須) | DynamoDB のテーブル名。指定しないと `Cache::config()` が `CacheException` を投げます。 |
 | `prefix` | `<APP_DIR>_` | キャッシュキーのプレフィックス。`clear()` はこのプレフィックスを持つアイテムだけを削除します。 |
 | `duration` | `3600` | エントリーが期限切れになるまでの秒数、または `strtotime()` 形式の文字列。`0` は期限切れにならないことを意味します。 |
 | `groups` | `[]` | キャッシュグループ。`Cache::clearGroup()` でクリアします。 |

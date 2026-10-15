@@ -1,7 +1,7 @@
 # DynamoDB セッションハンドラー
 
 `Aws.DynamoDbSession` は、`Aws\DynamoDb\SessionHandler` を使ってセッションを DynamoDB のテーブルに
-保存します。`config/core.php` (レガシーレイアウトでは `app/Config/core.php`) で設定します。
+保存します。`config/core.php` (レガシー構成では `app/Config/core.php`) で設定します。
 
 ```php
 Configure::write('Session', [
@@ -23,7 +23,7 @@ Configure::write('Session', [
 ]);
 ```
 
-- `handler.table_name` は必須です。指定がない場合は `CakeException` がスローされます。
+- `handler.table_name` は必須です。指定がない場合は `CakeException` が投げられます。
 - `handler` のほかのキー (`engine` を除く) は、SDK のセッションハンドラーに渡されます。たとえば
   `locking`、`session_lifetime`、`consistent_read` です。`'locking' => false` を設定しない限り、
   セッションのロックは有効です。

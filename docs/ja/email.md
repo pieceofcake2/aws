@@ -1,7 +1,7 @@
 # Amazon SES メールトランスポート
 
 `Aws.AmazonSesApi` は、Amazon SES API v2 の `SendEmail` オペレーションでメールを送信します。
-`config/email.php` (レガシーレイアウトでは `app/Config/email.php`) で、メールプロファイルの
+`config/email.php` (レガシー構成では `app/Config/email.php`) で、メールプロファイルの
 トランスポートとして設定します。
 
 ```php
