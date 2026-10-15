@@ -183,8 +183,8 @@ DynamoDB removes the expired sessions itself:
 - Each write and close of a session stores its expiration time, the current time plus
   `session_lifetime`, in the `expires` attribute.
 - DynamoDB's [Time to Live](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/TTL.html)
-  deletes the items whose `expires` time has passed. It runs in the background at no cost, and
-  an item is usually deleted within a few days (up to about 48 hours) after it expires.
+  deletes the items whose `expires` time has passed. It runs in the background at no cost but
+  lazily: an expired item can stay in the table for up to about 48 hours, sometimes longer.
 - Until then, the handler reads an expired session as an empty session without deleting it,
   and the next write of that session replaces the old data. An expired session never comes back.
 
@@ -204,10 +204,14 @@ PHP picks for garbage collection, so keep it off when Time to Live is enabled. T
 set the probability in `Session.ini`, for example once every 1000 session starts:
 
 ```php
-'ini' => [
-    'session.gc_probability' => 1,
-    'session.gc_divisor' => 1000,
-],
+Configure::write('Session', [
+    // ...
+    'ini' => [
+        'session.cookie_lifetime' => 0,
+        'session.gc_probability' => 1,
+        'session.gc_divisor' => 1000,
+    ],
+]);
 ```
 
 The SDK's `SessionHandler::garbageCollect()` uses the same deletion.
